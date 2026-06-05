@@ -1,0 +1,49 @@
+# =============================================================================
+# Dockerfile example — PHP + librdkafka + ext-rdkafka + wf/kafka
+# =============================================================================
+# Copy file này vào project của bạn và chỉnh sửa theo nhu cầu.
+# =============================================================================
+
+# ── Base: PHP 8.2 FPM trên Alpine (nhỏ nhất) ──────────────────────────────
+FROM php:8.2-fpm-alpine AS base
+
+# Cài librdkafka + build tools, compile ext-rdkafka, rồi dọn dẹp
+RUN apk add --no-cache \
+        librdkafka \
+        librdkafka-dev \
+        $PHPIZE_DEPS \
+    && pecl install rdkafka \
+    && docker-php-ext-enable rdkafka \
+    # Dọn dẹp build deps — không để lại trong production image
+    && apk del --no-cache $PHPIZE_DEPS librdkafka-dev \
+    && rm -rf /tmp/pear /var/cache/apk/*
+
+# Verify
+RUN php -m | grep rdkafka
+
+# ── Cài Composer ──────────────────────────────────────────────────────────
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# ── Copy project và cài dependencies ──────────────────────────────────────
+WORKDIR /var/www/html
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --optimize-autoloader --no-interaction
+
+COPY . .
+
+# ── Chạy Artisan consumer (ví dụ) ─────────────────────────────────────────
+# CMD ["php", "artisan", "consumer:orders"]
+
+
+# =============================================================================
+# Variant: Ubuntu 22.04 (nếu cần apt-based)
+# =============================================================================
+# FROM php:8.2-fpm AS base
+#
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#         librdkafka-dev \
+#     && pecl install rdkafka \
+#     && docker-php-ext-enable rdkafka \
+#     && apt-get purge -y librdkafka-dev \
+#     && apt-get autoremove -y \
+#     && rm -rf /var/lib/apt/lists/* /tmp/pear
