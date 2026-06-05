@@ -1,4 +1,4 @@
-# wf/kafka
+# kafka/workflow
 
 Laravel Kafka package — Transactional Outbox, Batch Relayer, Consumer Dispatcher với DLQ/EDL routing và Telegram alerting.
 
@@ -36,8 +36,8 @@ php artisan kafka:install --force  # Không hỏi confirm
 
 **Cách B — Shell script (CI/CD, server, trước khi có Laravel)**
 ```bash
-bash vendor/wf/kafka/scripts/install-rdkafka.sh
-bash vendor/wf/kafka/scripts/install-rdkafka.sh --check
+bash vendor/kafka/workflow/scripts/install-rdkafka.sh
+bash vendor/kafka/workflow/scripts/install-rdkafka.sh --check
 ```
 
 **Cách C — Composer scripts shortcut**
@@ -64,7 +64,7 @@ OS được hỗ trợ tự động: **macOS** (Homebrew), **Ubuntu/Debian** (ap
 ### Bước 2 — Cài package
 
 ```bash
-composer require wf/kafka
+composer require kafka/workflow
 ```
 
 ---
@@ -490,7 +490,7 @@ php artisan vendor:publish --tag=kafka-migrations
 ## CẤU TRÚC PACKAGE
 
 ```
-wf/kafka
+kafka/workflow
 ├── composer.json
 ├── config/
 │   └── kafka.php                        ← Publish vào project host

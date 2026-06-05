@@ -1,5 +1,7 @@
 {
     "name": "kafka/workflow",
+    "minimum-stability": "stable",
+    "prefer-stable": true,
     "description": "Laravel Kafka package — Transactional Outbox, Relayer, Consumer dispatcher with DLQ/EDL and Telegram alerting.",
     "type": "library",
     "license": "MIT",
@@ -50,7 +52,5 @@
     "scripts": {
         "kafka:install": "bash vendor/wf/kafka/scripts/install-rdkafka.sh",
         "kafka:check":   "bash vendor/wf/kafka/scripts/install-rdkafka.sh --check"
-    },
-    "minimum-stability": "stable",
-    "prefer-stable": true
+    }
 }
