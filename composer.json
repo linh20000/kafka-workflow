@@ -1,5 +1,5 @@
 {
-    "name": "wf/kafka",
+    "name": "kafka/workflow",
     "description": "Laravel Kafka package — Transactional Outbox, Relayer, Consumer dispatcher with DLQ/EDL and Telegram alerting.",
     "type": "library",
     "license": "MIT",
