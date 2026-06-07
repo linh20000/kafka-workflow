@@ -73,7 +73,7 @@ class KafkaServiceProvider extends ServiceProvider
         // ── Publish config ────────────────────────────────────────────────────
         // php artisan vendor:publish --tag=kafka-config
         $this->publishes([
-            __DIR__ . '/../config/kafka.php' => config_path('kafka.php'),
+            __DIR__ . '/../config/wf-kafka.php' => config_path('kafka.php'),
         ], 'kafka-config');
 
         // ── Publish migrations ────────────────────────────────────────────────
