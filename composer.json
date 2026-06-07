@@ -12,13 +12,13 @@
         }
     ],
     "require": {
+        "flix-tech/avro-php": "^5.1",
         "php": "^8.2",
-        "illuminate/support": "^10.0|^11.0",
-        "illuminate/console": "^10.0|^11.0",
-        "illuminate/database": "^10.0|^11.0",
-        "illuminate/http": "^10.0|^11.0",
         "ext-rdkafka": "*",
-        "flix-tech/avro-php": "^5.1"
+        "illuminate/console": "^9.0|^10.0|^11.0",
+        "illuminate/database": "^9.0|^10.0|^11.0",
+        "illuminate/http": "^9.0|^10.0|^11.0",
+        "illuminate/support": "^9.0|^10.0|^11.0"
     },
     "require-dev": {
         "orchestra/testbench": "^8.0|^9.0",
