@@ -18,26 +18,26 @@ class KafkaServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/wf-kafka.php', 'kafka');
+        $this->mergeConfigFrom(__DIR__ . '/../config/wf-kafka.php', 'wf-kafka');
 
         // ── KafkaConfig ─────────────────────────────────────────────────────
         $this->app->singleton(KafkaConfig::class, function ($app) {
-            return new KafkaConfig($app['config']['kafka']);
+            return new KafkaConfig($app['config']['wf-kafka']);
         });
 
         // ── MessageSerializer ────────────────────────────────────────────────
         // Singleton: một serializer dùng chung cho cả producer lẫn consumer.
-        // Driver được đọc từ config('kafka.serialization.driver').
+        // Driver được đọc từ config('wf-kafka.serialization.driver').
         $this->app->singleton(MessageSerializer::class, function ($app) {
             return SerializerFactory::make(
-                $app['config']['kafka']['serialization'] ?? ['driver' => 'json']
+                $app['config']['wf-kafka']['serialization'] ?? ['driver' => 'json']
             );
         });
 
         // ── TelegramNotifier ─────────────────────────────────────────────────
         $this->app->singleton(TelegramNotifier::class, function ($app) {
             return new TelegramNotifier(
-                $app['config']['kafka']['telegram'] ?? []
+                $app['config']['wf-kafka']['telegram'] ?? []
             );
         });
 
@@ -73,7 +73,7 @@ class KafkaServiceProvider extends ServiceProvider
         // ── Publish config ────────────────────────────────────────────────────
         // php artisan vendor:publish --tag=kafka-config
         $this->publishes([
-            __DIR__ . '/../config/wf-kafka.php' => config_path('kafka.php'),
+            __DIR__ . '/../config/wf-kafka.php' => config_path('wf-kafka.php'),
         ], 'kafka-config');
 
         // ── Publish migrations ────────────────────────────────────────────────
