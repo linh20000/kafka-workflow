@@ -18,7 +18,7 @@ class KafkaServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/kafka.php', 'kafka');
+        $this->mergeConfigFrom(__DIR__ . '/../config/wf-kafka.php', 'kafka');
 
         // ── KafkaConfig ─────────────────────────────────────────────────────
         $this->app->singleton(KafkaConfig::class, function ($app) {
