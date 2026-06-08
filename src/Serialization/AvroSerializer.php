@@ -45,15 +45,19 @@ class AvroSerializer implements MessageSerializer
     private array  $authHeader;
     private string $subjectStrategy;
     private bool   $useCache;
+    private bool   $autoRegister;
+    private string $autoRegisterCompatibility;
     /** @var array<string, string> topic → local .avsc file path */
     private array  $localSchemas;
 
     public function __construct(array $avroConfig)
     {
-        $this->registryUrl     = rtrim($avroConfig['registry_url']      ?? 'http://localhost:8081', '/');
-        $this->subjectStrategy = $avroConfig['subject_strategy']        ?? 'topic_name';
-        $this->useCache        = (bool) ($avroConfig['schema_cache']    ?? true);
-        $this->localSchemas    = $avroConfig['schemas']                 ?? [];
+        $this->registryUrl                = rtrim($avroConfig['registry_url']              ?? 'http://localhost:8081', '/');
+        $this->subjectStrategy            = $avroConfig['subject_strategy']                ?? 'topic_name';
+        $this->useCache                   = (bool) ($avroConfig['schema_cache']            ?? true);
+        $this->autoRegister               = (bool) ($avroConfig['auto_register']           ?? false);
+        $this->autoRegisterCompatibility  = strtoupper($avroConfig['auto_register_compatibility'] ?? 'NONE');
+        $this->localSchemas               = $avroConfig['schemas']                         ?? [];
 
         $user = $avroConfig['registry_username'] ?? '';
         $pass = $avroConfig['registry_password'] ?? '';
@@ -69,7 +73,7 @@ class AvroSerializer implements MessageSerializer
         $this->assertAvroLibLoaded();
 
         $subject  = $this->resolveSubject($topic, $eventType);
-        [$schemaId, $schemaJson] = $this->fetchBySubject($subject, $topic);
+        [$schemaId, $schemaJson] = $this->fetchBySubject($subject, $topic, $payload);
 
         $binary = $this->avroBinaryEncode($schemaJson, $payload);
 
@@ -125,10 +129,12 @@ class AvroSerializer implements MessageSerializer
     /**
      * Fetch schema_id + schema JSON theo subject (dùng khi serialize).
      * Ưu tiên local .avsc file nếu được khai báo trong config.
+     * Nếu subject chưa tồn tại (404) và auto_register=true → tự động infer + đăng ký schema.
      *
+     * @param array|null $payloadHint  Payload mẫu dùng để infer schema nếu cần auto-register
      * @return array{int, string} [schema_id, schema_json]
      */
-    private function fetchBySubject(string $subject, string $topic): array
+    private function fetchBySubject(string $subject, string $topic, ?array $payloadHint = null): array
     {
         // Local file override — fetch schema_id vẫn cần từ Registry
         $localJson = $this->loadLocalSchema($topic);
@@ -143,6 +149,29 @@ class AvroSerializer implements MessageSerializer
 
         $url      = "{$this->registryUrl}/subjects/{$subject}/versions/latest";
         $response = Http::withHeaders($this->authHeader)->get($url);
+
+        // ── Auto-register khi subject chưa tồn tại ────────────────────────
+        if ($response->status() === 404 && $this->autoRegister) {
+            if ($payloadHint === null) {
+                throw new \RuntimeException(
+                    "[wf-kafka][Avro] Subject '{$subject}' not found and no payload provided for auto-registration."
+                );
+            }
+
+            $schemaJson = $localJson ?? $this->inferSchema($subject, $payloadHint);
+            $schemaId   = $this->autoRegisterSchema($subject, $schemaJson);
+
+            Log::info('[wf-kafka][Avro] Auto-registered schema', [
+                'subject'   => $subject,
+                'schema_id' => $schemaId,
+            ]);
+
+            if ($this->useCache) {
+                Cache::put($cacheKey, [$schemaId, $schemaJson], self::CACHE_TTL);
+            }
+
+            return [$schemaId, $schemaJson];
+        }
 
         if (!$response->successful()) {
             throw new \RuntimeException(
@@ -246,6 +275,117 @@ class AvroSerializer implements MessageSerializer
                 previous: $e
             );
         }
+    }
+
+    // ── Auto Schema Inference & Registration ──────────────────────────────
+
+    /**
+     * Tự động infer Avro schema từ PHP array payload.
+     *
+     * Mapping PHP → Avro:
+     *   string  → "string"
+     *   int     → "long"
+     *   float   → "double"
+     *   bool    → "boolean"
+     *   null    → "null"
+     *   array   → {"type": "array", "items": "string"} (list)
+     *            → {"type": "map", "values": "string"} (assoc)
+     *   mixed   → ["null", "string"] (safe union fallback)
+     *
+     * Schema được đặt tên theo subject để tránh xung đột Registry.
+     */
+    private function inferSchema(string $subject, array $payload): string
+    {
+        // Tạo tên record an toàn từ subject (bỏ ký tự đặc biệt)
+        $recordName = preg_replace('/[^A-Za-z0-9_]/', '_', $subject);
+
+        $fields = [];
+        foreach ($payload as $key => $value) {
+            $fields[] = [
+                'name'    => (string) $key,
+                'type'    => $this->inferAvroType($value),
+                'default' => $this->inferDefault($value),
+            ];
+        }
+
+        $schema = [
+            'type'      => 'record',
+            'name'      => $recordName,
+            'namespace' => 'wf.kafka.auto',
+            'doc'       => 'Auto-generated by wf/kafka package. Subject: ' . $subject,
+            'fields'    => $fields,
+        ];
+
+        return json_encode($schema, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Map PHP value → Avro type.
+     * Dùng nullable union khi value có thể null.
+     *
+     * @return string|array Avro type definition
+     */
+    private function inferAvroType(mixed $value): string|array
+    {
+        return match (true) {
+            is_null($value)                           => ['null', 'string'],  // nullable string
+            is_bool($value)                           => 'boolean',
+            is_int($value)                            => 'long',
+            is_float($value)                          => 'double',
+            is_string($value)                         => 'string',
+            is_array($value) && array_is_list($value) => ['type' => 'array', 'items' => 'string'],
+            is_array($value)                          => ['type' => 'map', 'values' => 'string'],
+            default                                   => 'string',  // fallback an toàn
+        };
+    }
+
+    /**
+     * Trả về default value phù hợp với Avro type.
+     * Avro bắt buộc khai báo default cho union type bắt đầu bằng 'null'.
+     */
+    private function inferDefault(mixed $value): mixed
+    {
+        return match (true) {
+            is_null($value)  => null,
+            is_bool($value)  => false,
+            is_int($value)   => 0,
+            is_float($value) => 0.0,
+            is_array($value) => [],
+            default          => '',
+        };
+    }
+
+    /**
+     * Đăng ký schema lên Confluent Schema Registry.
+     * Nếu schema đã tồn tại (identical) → Registry trả về schema_id cũ (idempotent).
+     * Nếu subject chưa tồn tại → Registry tạo mới với compatibility được chỉ định.
+     *
+     * @return int schema_id
+     */
+    private function autoRegisterSchema(string $subject, string $schemaJson): int
+    {
+        // Bước 1: Set compatibility mode trước khi đăng ký
+        $compatUrl = "{$this->registryUrl}/config/{$subject}";
+        Http::withHeaders($this->authHeader)->put($compatUrl, [
+            'compatibility' => $this->autoRegisterCompatibility,
+        ]);
+
+        // Bước 2: Đăng ký schema
+        $url      = "{$this->registryUrl}/subjects/{$subject}/versions";
+        $response = Http::withHeaders(array_merge($this->authHeader, [
+            'Content-Type' => 'application/vnd.schemaregistry.v1+json',
+        ]))->post($url, [
+            'schema' => $schemaJson,
+        ]);
+
+        if (!$response->successful()) {
+            throw new \RuntimeException(
+                "[wf-kafka][Avro] Auto-registration failed for subject '{$subject}': "
+                . $response->status() . ' — ' . $response->body()
+            );
+        }
+
+        return (int) $response->json('id');
     }
 
     // ── Guard ──────────────────────────────────────────────────────────────
