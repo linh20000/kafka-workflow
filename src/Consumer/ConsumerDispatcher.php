@@ -183,7 +183,7 @@ class ConsumerDispatcher
             $this->routeToEdl(
                 $message->topic_name,
                 $message->payload,
-                ['event_id' => 'DECODE_FAILED', 'event_type' => 'UNKNOWN', 'raw' => $message->payload],
+                ['event_id' => 'DECODE_FAILED', 'event_type' => 'UNKNOWN', 'raw' => base64_encode($message->payload)],
                 'Deserialization failed: ' . $e->getMessage()
             );
             $this->rdConsumer->commit($message);
@@ -193,7 +193,7 @@ class ConsumerDispatcher
         // ── BƯỚC 2: Validate envelope tối thiểu ──────────────────────────
         // Package chỉ kiểm tra cấu trúc bắt buộc của envelope, không validate business data.
         if (!is_array($envelope) || empty($envelope['event_id'])) {
-            $parsed = is_array($envelope) ? $envelope : ['raw' => $message->payload];
+            $parsed = is_array($envelope) ? $envelope : ['raw' => base64_encode($message->payload)];
             $parsed['event_id']   = $parsed['event_id'] ?? 'MISSING';
             $parsed['event_type'] = $parsed['event_type'] ?? 'UNKNOWN';
 
