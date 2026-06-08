@@ -36,12 +36,16 @@ class TelegramNotifier
     {
         if (!$this->shouldAlert('dlq')) return;
 
+        $topicHtml   = htmlspecialchars($topic, ENT_QUOTES | ENT_HTML5);
+        $eventIdHtml = htmlspecialchars($eventId, ENT_QUOTES | ENT_HTML5);
+        $reasonHtml  = htmlspecialchars($reason, ENT_QUOTES | ENT_HTML5);
+
         $this->send(
-            "⚠️ *DLQ ALERT*\n\n"
-            . "📌 Topic: `{$topic}`\n"
-            . "🔑 Event ID: `{$eventId}`\n"
-            . "❗ Reason: {$reason}\n"
-            . "_Message sẽ được retry sau khi hạ tầng ổn định._"
+            "⚠️ <b>DLQ ALERT</b>\n\n"
+            . "📌 Topic: <code>{$topicHtml}</code>\n"
+            . "🔑 Event ID: <code>{$eventIdHtml}</code>\n"
+            . "❗ Reason: {$reasonHtml}\n"
+            . "<i>Message sẽ được retry sau khi hạ tầng ổn định.</i>"
         );
     }
 
@@ -52,12 +56,16 @@ class TelegramNotifier
     {
         if (!$this->shouldAlert('edl')) return;
 
+        $topicHtml   = htmlspecialchars($topic, ENT_QUOTES | ENT_HTML5);
+        $eventIdHtml = htmlspecialchars($eventId, ENT_QUOTES | ENT_HTML5);
+        $reasonHtml  = htmlspecialchars($reason, ENT_QUOTES | ENT_HTML5);
+
         $this->send(
-            "🚨 *EDL ALERT — Poison Pill*\n\n"
-            . "📌 Topic: `{$topic}`\n"
-            . "🔑 Event ID: `{$eventId}`\n"
-            . "❗ Reason: {$reason}\n"
-            . "_Message đã bị cách ly xuống DB. Cần can thiệp thủ công._"
+            "🚨 <b>EDL ALERT — Poison Pill</b>\n\n"
+            . "📌 Topic: <code>{$topicHtml}</code>\n"
+            . "🔑 Event ID: <code>{$eventIdHtml}</code>\n"
+            . "❗ Reason: {$reasonHtml}\n"
+            . "<i>Message đã bị cách ly xuống DB. Cần can thiệp thủ công.</i>"
         );
     }
 
@@ -79,7 +87,7 @@ class TelegramNotifier
             $response = Http::timeout(5)->post($url, [
                 'chat_id'    => $this->chatId,
                 'text'       => $text,
-                'parse_mode' => 'Markdown',
+                'parse_mode' => 'HTML',
             ]);
 
             if (!$response->successful()) {
