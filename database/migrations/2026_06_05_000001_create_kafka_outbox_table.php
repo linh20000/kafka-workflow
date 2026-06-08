@@ -13,7 +13,7 @@ return new class extends Migration
             $table->string('event_id', 100)->unique();
             $table->string('topic');
             $table->string('event_type', 100);
-            $table->json('payload');
+            $table->mediumblob('payload');
             $table->string('status', 20)->default('PENDING'); // PENDING | SENT | FAILED
             $table->unsignedTinyInteger('attempts')->default(0);
             $table->text('last_error')->nullable();

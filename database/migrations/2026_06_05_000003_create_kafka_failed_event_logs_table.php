@@ -14,7 +14,7 @@ return new class extends Migration
             $table->string('event_type', 100);
             $table->string('original_topic');
             $table->string('failure_type', 10); // DLQ | EDL
-            $table->json('payload');
+            $table->mediumblob('payload');
             $table->text('failure_reason');
 
             // PENDING_FIX → đang chờ xử lý
