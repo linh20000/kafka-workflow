@@ -188,26 +188,6 @@ return [
              */
             'schema_cache' => (bool) env('KAFKA_AVRO_SCHEMA_CACHE', true),
 
-            /*
-             | Tự động infer schema từ payload và đăng ký lên Schema Registry
-             | khi subject chưa tồn tại (404).
-             |
-             | ⚠️  Chỉ bật trong môi trường dev/staging.
-             |     Trong production nên quản lý schema thủ công.
-             |
-             | .env: KAFKA_AVRO_AUTO_REGISTER
-             */
-            'auto_register' => (bool) env('KAFKA_AVRO_AUTO_REGISTER', false),
-
-            /*
-             | Compatibility mode khi tự động đăng ký schema mới.
-             | NONE     — Không kiểm tra compatibility (linh hoạt nhất, phù hợp dev)
-             | BACKWARD — Consumer mới đọc được data cũ
-             | FORWARD  — Consumer cũ đọc được data mới
-             | FULL     — Cả hai chiều
-             | .env: KAFKA_AVRO_AUTO_REGISTER_COMPATIBILITY
-             */
-            'auto_register_compatibility' => env('KAFKA_AVRO_AUTO_REGISTER_COMPATIBILITY', 'NONE'),
 
             /*
              | Map topic → đường dẫn file .avsc (schema cục bộ).
