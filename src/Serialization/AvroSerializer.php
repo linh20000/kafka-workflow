@@ -251,7 +251,7 @@ class AvroSerializer implements MessageSerializer
         $io      = new \AvroStringIO();
         $encoder = new \AvroIOBinaryEncoder($io);
         $writer  = new \AvroIODatumWriter($schema);
-        $writer->write($this->normalizeForAvro($data), $encoder);
+        $writer->write($data, $encoder);
         return $io->string();
     }
 
@@ -268,8 +268,7 @@ class AvroSerializer implements MessageSerializer
             $decoder = new \AvroIOBinaryDecoder($io);
             $reader  = new \AvroIODatumReader($schema, $schema);
             $result  = $reader->read($decoder);
-            $decoded = is_array($result) ? $result : (array) $result;
-            return $this->denormalizeFromAvro($decoded);
+            return is_array($result) ? $result : (array) $result;
         } catch (\Throwable $e) {
             throw new DeserializationException(
                 "[wf-kafka][Avro] Binary decode failed: {$e->getMessage()}",
@@ -281,32 +280,13 @@ class AvroSerializer implements MessageSerializer
     // ── Auto Schema Inference & Registration ──────────────────────────────
 
     /**
-     * Tự động infer Avro schema từ PHP array payload.
-     *
-     * Chiến lược type mapping (simple + an toàn):
-     *   string          → "string"
-     *   int             → "long"
-     *   float           → "double"
-     *   bool            → "boolean"
-     *   null            → ["null", "string"]   (nullable union, default = null)
-     *   array (bất kỳ) → "string"             (sẽ được JSON-encode trước khi encode Avro)
-     *
-     * Nested array được flatten thành JSON string để tránh vấn đề mixed-type map values.
-     * Consumer sẽ tự JSON-decode lại được nhờ denormalizeFromAvro().
+     * Tự động infer Avro schema từ PHP array payload (Hỗ trợ Nested Record).
      */
     private function inferSchema(string $subject, array $payload): string
     {
         $recordName = preg_replace('/[^A-Za-z0-9_]/', '_', $subject);
 
-        $fields = [];
-        foreach ($payload as $key => $value) {
-            [$avroType, $default] = $this->inferAvroTypeAndDefault($value);
-            $field = ['name' => (string) $key, 'type' => $avroType];
-            if ($default !== '__NO_DEFAULT__') {
-                $field['default'] = $default;
-            }
-            $fields[] = $field;
-        }
+        $fields = $this->inferRecordFields($payload, $recordName);
 
         $schema = [
             'type'      => 'record',
@@ -320,64 +300,77 @@ class AvroSerializer implements MessageSerializer
     }
 
     /**
-     * Trả về [avro_type, default_value] phù hợp cho từng PHP value.
-     *
-     * Quy tắc Avro:
-     *   - Union type ["null", "X"] phải có default = null (phần tử đầu tiên)
-     *   - Primitive type "string", "long", v.v. có default tương ứng
-     *   - Array (nested) → string (sẽ JSON-encode), default = ""
-     *
-     * @return array{0: string|list<string>, 1: mixed} [type, default]
+     * Duyệt qua một mảng (associative array) để tạo danh sách các field cho một Record.
      */
-    private function inferAvroTypeAndDefault(mixed $value): array
+    private function inferRecordFields(array $data, string $parentName): array
     {
-        return match (true) {
-            is_null($value)  => [['null', 'string'], null],   // nullable, default = null
-            is_bool($value)  => ['boolean', false],
-            is_int($value)   => ['long',    0],
-            is_float($value) => ['double',  0.0],
-            is_string($value)=> ['string',  ''],
-            is_array($value) => ['string',  ''],              // JSON-encoded, default = ""
-            default          => ['string',  ''],
-        };
-    }
-
-    /**
-     * Pre-process payload trước khi đưa vào Avro binary encoder.
-     * - Array values → JSON-encode thành string
-     * - null values → giữ nguyên (Avro union ["null", "string"] hỗ trợ null)
-     * - Scalar values → giữ nguyên
-     */
-    private function normalizeForAvro(array $data): array
-    {
-        $result = [];
+        $fields = [];
         foreach ($data as $key => $value) {
-            $result[$key] = is_array($value)
-                ? json_encode($value, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR)
-                : $value;
+            $fieldName = (string) $key;
+            [$avroType, $default] = $this->inferAvroTypeAndDefault($value, $fieldName, $parentName);
+            
+            $field = ['name' => $fieldName, 'type' => $avroType];
+            if ($default !== '__NO_DEFAULT__') {
+                $field['default'] = $default;
+            }
+            $fields[] = $field;
         }
-        return $result;
+        return $fields;
     }
 
     /**
-     * Post-process sau khi Avro decode.
-     * - String values có dạng JSON array/object → JSON-decode lại thành array
-     * - Các values khác giữ nguyên
+     * Trả về [avro_type, default_value] phù hợp cho từng PHP value.
+     * Hỗ trợ đệ quy cho nested associative array -> Record, indexed array -> Array.
+     *
+     * @return array{0: mixed, 1: mixed} [type, default]
      */
-    private function denormalizeFromAvro(array $data): array
+    private function inferAvroTypeAndDefault(mixed $value, string $fieldName, string $parentName): array
     {
-        $result = [];
-        foreach ($data as $key => $value) {
-            if (is_string($value) && strlen($value) > 0
-                && ($value[0] === '{' || $value[0] === '[')
-            ) {
-                $decoded = json_decode($value, true);
-                $result[$key] = ($decoded !== null) ? $decoded : $value;
+        if (is_null($value)) {
+            return [['null', 'string'], null];
+        }
+        if (is_bool($value)) {
+            return ['boolean', false];
+        }
+        if (is_int($value)) {
+            return ['long', 0];
+        }
+        if (is_float($value)) {
+            return ['double', 0.0];
+        }
+        if (is_string($value)) {
+            return ['string', ''];
+        }
+        if (is_array($value)) {
+            if (empty($value)) {
+                // Mảng rỗng -> mặc định là mảng string
+                return [['type' => 'array', 'items' => 'string'], []];
+            }
+
+            if (array_is_list($value)) {
+                // Indexed array -> Avro Array
+                $firstElem = $value[0];
+                [$itemType, ] = $this->inferAvroTypeAndDefault($firstElem, $fieldName . '_item', $parentName);
+                return [['type' => 'array', 'items' => $itemType], []];
             } else {
-                $result[$key] = $value;
+                // Associative array -> Nested Record
+                $recordName = $parentName . '_' . $fieldName;
+                $fields = $this->inferRecordFields($value, $recordName);
+                
+                $recordType = [
+                    'type'   => 'record',
+                    'name'   => $recordName,
+                    'fields' => $fields,
+                ];
+                
+                // Nếu ta gán default = [] cho associative array, JSON encode sẽ ra [] thay vì {}
+                // Điều này có thể vi phạm chuẩn Avro schema. 
+                // Tốt nhất là không set default cho Nested Record, hoặc set dạng object để ra {}
+                return [$recordType, (object)[]];
             }
         }
-        return $result;
+
+        return ['string', ''];
     }
 
     /**
