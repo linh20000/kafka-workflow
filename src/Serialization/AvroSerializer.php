@@ -45,19 +45,15 @@ class AvroSerializer implements MessageSerializer
     private array  $authHeader;
     private string $subjectStrategy;
     private bool   $useCache;
-    private bool   $autoRegister;
-    private string $autoRegisterCompatibility;
     /** @var array<string, string> topic → local .avsc file path */
     private array  $localSchemas;
 
     public function __construct(array $avroConfig)
     {
-        $this->registryUrl                = rtrim($avroConfig['registry_url']              ?? 'http://localhost:8081', '/');
-        $this->subjectStrategy            = $avroConfig['subject_strategy']                ?? 'topic_name';
-        $this->useCache                   = (bool) ($avroConfig['schema_cache']            ?? true);
-        $this->autoRegister               = (bool) ($avroConfig['auto_register']           ?? false);
-        $this->autoRegisterCompatibility  = strtoupper($avroConfig['auto_register_compatibility'] ?? 'NONE');
-        $this->localSchemas               = $avroConfig['schemas']                         ?? [];
+        $this->registryUrl     = rtrim($avroConfig['registry_url']      ?? 'http://localhost:8081', '/');
+        $this->subjectStrategy = $avroConfig['subject_strategy']        ?? 'topic_name';
+        $this->useCache        = (bool) ($avroConfig['schema_cache']    ?? true);
+        $this->localSchemas    = $avroConfig['schemas']                 ?? [];
 
         $user = $avroConfig['registry_username'] ?? '';
         $pass = $avroConfig['registry_password'] ?? '';
@@ -73,7 +69,7 @@ class AvroSerializer implements MessageSerializer
         $this->assertAvroLibLoaded();
 
         $subject  = $this->resolveSubject($topic, $eventType);
-        [$schemaId, $schemaJson] = $this->fetchBySubject($subject, $topic, $payload);
+        [$schemaId, $schemaJson] = $this->fetchBySubject($subject, $topic);
 
         $binary = $this->avroBinaryEncode($schemaJson, $payload);
 
@@ -129,7 +125,6 @@ class AvroSerializer implements MessageSerializer
     /**
      * Fetch schema_id + schema JSON theo subject (dùng khi serialize).
      * Ưu tiên local .avsc file nếu được khai báo trong config.
-     * Nếu subject chưa tồn tại (404) và auto_register=true → tự động infer + đăng ký schema.
      *
      * @param array|null $payloadHint  Payload mẫu dùng để infer schema nếu cần auto-register
      * @return array{int, string} [schema_id, schema_json]
@@ -280,13 +275,33 @@ class AvroSerializer implements MessageSerializer
     // ── Auto Schema Inference & Registration ──────────────────────────────
 
     /**
-     * Tự động infer Avro schema từ PHP array payload (Hỗ trợ Nested Record).
+     * Tự động infer Avro schema từ PHP array payload.
+     *
+     * Mapping PHP → Avro:
+     *   string  → "string"
+     *   int     → "long"
+     *   float   → "double"
+     *   bool    → "boolean"
+     *   null    → "null"
+     *   array   → {"type": "array", "items": "string"} (list)
+     *            → {"type": "map", "values": "string"} (assoc)
+     *   mixed   → ["null", "string"] (safe union fallback)
+     *
+     * Schema được đặt tên theo subject để tránh xung đột Registry.
      */
     private function inferSchema(string $subject, array $payload): string
     {
+        // Tạo tên record an toàn từ subject (bỏ ký tự đặc biệt)
         $recordName = preg_replace('/[^A-Za-z0-9_]/', '_', $subject);
 
-        $fields = $this->inferRecordFields($payload, $recordName);
+        $fields = [];
+        foreach ($payload as $key => $value) {
+            $fields[] = [
+                'name'    => (string) $key,
+                'type'    => $this->inferAvroType($value),
+                'default' => $this->inferDefault($value),
+            ];
+        }
 
         $schema = [
             'type'      => 'record',
@@ -300,93 +315,39 @@ class AvroSerializer implements MessageSerializer
     }
 
     /**
-     * Duyệt qua một mảng (associative array) để tạo danh sách các field cho một Record.
-     */
-    private function inferRecordFields(array $data, string $parentName): array
-    {
-        $fields = [];
-        foreach ($data as $key => $value) {
-            $fieldName = (string) $key;
-            [$avroType, $default] = $this->inferAvroTypeAndDefault($value, $fieldName, $parentName);
-            
-            $field = ['name' => $fieldName, 'type' => $avroType];
-            if ($default !== '__NO_DEFAULT__') {
-                $field['default'] = $default;
-            }
-            $fields[] = $field;
-        }
-        return $fields;
-    }
-
-    /**
-     * Trả về [avro_type, default_value] phù hợp cho từng PHP value.
-     * Hỗ trợ đệ quy cho nested associative array -> Record, indexed array -> Array.
+     * Map PHP value → Avro type.
+     * Dùng nullable union khi value có thể null.
      *
-     * @return array{0: mixed, 1: mixed} [type, default]
-     */
-    private function inferAvroTypeAndDefault(mixed $value, string $fieldName, string $parentName): array
-    {
-        if (is_null($value)) {
-            return [['null', 'string'], null];
-        }
-        if (is_bool($value)) {
-            return ['boolean', false];
-        }
-        if (is_int($value)) {
-            return ['long', 0];
-        }
-        if (is_float($value)) {
-            return ['double', 0.0];
-        }
-        if (is_string($value)) {
-            return ['string', ''];
-        }
-        if (is_array($value)) {
-            if (empty($value)) {
-                // Mảng rỗng -> mặc định là mảng string
-                return [['type' => 'array', 'items' => 'string'], []];
-            }
-
-            if (array_is_list($value)) {
-                // Indexed array -> Avro Array
-                $firstElem = $value[0];
-                [$itemType, ] = $this->inferAvroTypeAndDefault($firstElem, $fieldName . '_item', $parentName);
-                return [['type' => 'array', 'items' => $itemType], []];
-            } else {
-                // Associative array -> Nested Record
-                $recordName = $parentName . '_' . $fieldName;
-                $fields = $this->inferRecordFields($value, $recordName);
-                
-                $recordType = [
-                    'type'   => 'record',
-                    'name'   => $recordName,
-                    'fields' => $fields,
-                ];
-                
-                // Nếu ta gán default = [] cho associative array, JSON encode sẽ ra [] thay vì {}
-                // Điều này có thể vi phạm chuẩn Avro schema. 
-                // Tốt nhất là không set default cho Nested Record, hoặc set dạng object để ra {}
-                return [$recordType, (object)[]];
-            }
-        }
-
-        return ['string', ''];
-    }
-
-    /**
-     * @deprecated Dùng inferAvroTypeAndDefault() thay thế
+     * @return string|array Avro type definition
      */
     private function inferAvroType(mixed $value): string|array
     {
-        return $this->inferAvroTypeAndDefault($value)[0];
+        return match (true) {
+            is_null($value)                           => ['null', 'string'],  // nullable string
+            is_bool($value)                           => 'boolean',
+            is_int($value)                            => 'long',
+            is_float($value)                          => 'double',
+            is_string($value)                         => 'string',
+            is_array($value) && array_is_list($value) => ['type' => 'array', 'items' => 'string'],
+            is_array($value)                          => ['type' => 'map', 'values' => 'string'],
+            default                                   => 'string',  // fallback an toàn
+        };
     }
 
     /**
-     * @deprecated Dùng inferAvroTypeAndDefault() thay thế
+     * Trả về default value phù hợp với Avro type.
+     * Avro bắt buộc khai báo default cho union type bắt đầu bằng 'null'.
      */
     private function inferDefault(mixed $value): mixed
     {
-        return $this->inferAvroTypeAndDefault($value)[1];
+        return match (true) {
+            is_null($value)  => null,
+            is_bool($value)  => false,
+            is_int($value)   => 0,
+            is_float($value) => 0.0,
+            is_array($value) => [],
+            default          => '',
+        };
     }
 
     /**
