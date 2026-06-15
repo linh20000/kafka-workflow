@@ -119,26 +119,26 @@ return [
     ],
 
     // =========================================================================
-    // OUTBOX RELAYER — Relayer service settings
+    // DEBEZIUM OUTBOX CONNECTOR
     // =========================================================================
-    'outbox' => [
+    'debezium' => [
         /*
-         | Số lần retry publish trước khi bỏ hẳn bản ghi.
-         | .env: KAFKA_OUTBOX_MAX_ATTEMPTS
+         | Tên của connector trên Kafka Connect.
+         | .env: DEBEZIUM_CONNECTOR_NAME
          */
-        'max_attempts' => (int) env('KAFKA_OUTBOX_MAX_ATTEMPTS', 3),
+        'connector_name' => env('DEBEZIUM_CONNECTOR_NAME', 'wf-kafka-outbox-connector'),
 
         /*
-         | Số bản ghi xử lý mỗi lần relayer chạy (batch relay).
-         | .env: KAFKA_OUTBOX_BATCH_SIZE
+         | Loại connector tương ứng với Database (MySQL, Postgres, v.v.)
+         | .env: DEBEZIUM_CONNECTOR_CLASS
          */
-        'batch_size' => (int) env('KAFKA_OUTBOX_BATCH_SIZE', 100),
+        'connector_class' => env('DEBEZIUM_CONNECTOR_CLASS', 'io.debezium.connector.mysql.MySqlConnector'),
 
         /*
-         | Khoảng thời gian giữa các lần scan khi dùng --loop (giây).
-         | .env: KAFKA_OUTBOX_RELAY_INTERVAL
+         | Topic lưu trữ các message bị lỗi cấu trúc (Poison Pill) của Debezium.
+         | .env: DEBEZIUM_DLQ_TOPIC
          */
-        'relay_interval_seconds' => (int) env('KAFKA_OUTBOX_RELAY_INTERVAL', 5),
+        'dlq_topic' => env('DEBEZIUM_DLQ_TOPIC', 'wf-kafka.outbox.dlq'),
     ],
 
     // =========================================================================

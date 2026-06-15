@@ -6,13 +6,12 @@ use Illuminate\Support\ServiceProvider;
 use Wf\Kafka\Alerting\TelegramNotifier;
 use Wf\Kafka\Consumer\ConsumerDispatcher;
 use Wf\Kafka\Kafka\KafkaConfig;
-use Wf\Kafka\Producer\OutboxRelayer;
 use Wf\Kafka\Producer\OutboxWriter;
 use Wf\Kafka\Serialization\MessageSerializer;
 use Wf\Kafka\Serialization\SerializerFactory;
 use Wf\Kafka\Console\Commands\KafkaRedriveCommand;
 use Wf\Kafka\Console\Commands\KafkaInstallCommand;
-use Wf\Kafka\Console\Commands\OutboxRelayCommand;
+use Wf\Kafka\Console\Commands\KafkaDebeziumConfigCommand;
 
 class KafkaServiceProvider extends ServiceProvider
 {
@@ -39,12 +38,6 @@ class KafkaServiceProvider extends ServiceProvider
             return new TelegramNotifier(
                 $app['config']['wf-kafka']['telegram'] ?? []
             );
-        });
-
-        // ── OutboxRelayer ────────────────────────────────────────────────────
-        // Singleton: giữ cùng rdkafka producer instance với internal queue buffer.
-        $this->app->singleton(OutboxRelayer::class, function ($app) {
-            return new OutboxRelayer($app->make(KafkaConfig::class));
         });
 
         // ── OutboxWriter ─────────────────────────────────────────────────────
@@ -88,9 +81,9 @@ class KafkaServiceProvider extends ServiceProvider
         // ── Artisan commands ──────────────────────────────────────────────────
         if ($this->app->runningInConsole()) {
             $this->commands([
-                OutboxRelayCommand::class,
                 KafkaRedriveCommand::class,
                 KafkaInstallCommand::class,
+                KafkaDebeziumConfigCommand::class,
             ]);
         }
     }

@@ -27,16 +27,4 @@ class OutboxEvent extends Model
     {
         return $this->attributes['payload'] ?? '';
     }
-
-    public function scopePending($query)
-    {
-        return $query->where('status', 'PENDING')->orderBy('id');
-    }
-
-    public function scopeRetryable($query, int $maxAttempts = 3)
-    {
-        return $query->where('status', 'FAILED')
-                     ->where('attempts', '<', $maxAttempts)
-                     ->orderBy('id');
-    }
 }

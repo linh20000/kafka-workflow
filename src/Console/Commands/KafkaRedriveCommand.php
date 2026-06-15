@@ -8,7 +8,7 @@ use Wf\Kafka\Producer\OutboxWriter;
 
 /**
  * Redrive: lấy các bản ghi DLQ từ kafka_failed_event_logs
- * và đẩy lại vào outbox để relayer publish lại.
+ * và đẩy lại vào outbox để Debezium bắt và publish lại.
  *
  * Sử dụng:
  *   php artisan kafka:redrive --type=dlq --topic=order-events
@@ -58,7 +58,7 @@ class KafkaRedriveCommand extends Command
 
         $redriven = 0;
         foreach ($records as $record) {
-            // Viết lại vào outbox để relayer xử lý lại
+            // Viết lại vào outbox để Debezium xử lý lại
             OutboxWriter::write(
                 topic:     $record->original_topic,
                 eventType: $record->event_type,
